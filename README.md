@@ -1,3 +1,8 @@
+> **This fork (strata-lab/allfours-profanity)** adds one thing to Detoxify: moderation of **game usernames**, short
+> handles like `FuckYou_69`, including Trinidad and Tobago / Caribbean terms, for the card game All Fours. Upstream's
+> code, models and configs are unchanged. The addition is a config, a dataset class, `detoxify/usernames.py` and the
+> [`usernames/`](usernames/README.md) folder. Everything below this note is upstream's README.
+
 <div align="center">
 
 # 🙊 Detoxify

@@ -1,0 +1,4 @@
+# Entries of ldnoobw_en.txt NOT used, with why. One per line: <term> <TAB> <reason>.
+xx	handle decoration (xXSlayerXx); "xxx" stays
+s&m	the username charset has no "&", and "sm" alone is too ambiguous
+🖕	the username charset has no emoji

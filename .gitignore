@@ -126,3 +126,6 @@ venv.bak/
 lightning_logs/
 MNIST
 .DS_Store
+
+# Training runs (train.py default_root_dir)
+saved/

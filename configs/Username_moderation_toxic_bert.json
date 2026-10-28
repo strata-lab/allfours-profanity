@@ -1,0 +1,39 @@
+{
+    "name": "Username_moderation_toxic_bert",
+    "n_gpu": 1,
+    "batch_size": 32,
+    "accumulate_grad_batches": 1,
+    "loss": "binary_cross_entropy",
+    "arch": {
+        "type": "BERT",
+        "args": {
+            "num_classes": 6,
+            "model_type": "usernames/base/toxic-bert",
+            "model_name": "BertForSequenceClassification",
+            "tokenizer_name": "BertTokenizer"
+        }
+    },
+    "dataset": {
+        "type": "UsernameData",
+        "args": {
+            "train_csv_file": "usernames/dataset/train.tsv",
+            "test_csv_file": "usernames/dataset/dev.tsv",
+            "classes": [
+                "toxicity",
+                "severe_toxicity",
+                "obscene",
+                "threat",
+                "insult",
+                "identity_attack"
+            ]
+        }
+    },
+    "optimizer": {
+        "type": "Adam",
+        "args": {
+            "lr": 3e-5,
+            "weight_decay": 3e-6,
+            "amsgrad": true
+        }
+    }
+}

@@ -216,3 +216,37 @@ class JigsawDataMultilingual(JigsawData):
         meta["text_id"] = text_id
 
         return text, meta
+
+
+class UsernameData(Dataset):
+    """Game usernames (All Fours fork addition, ALL-181): handles from a TSV of ``handle, label, group, term`` rows
+    (usernames/build_dataset.py). Each handle is given to the model as its normalised readings
+    (detoxify.usernames.text). Only the first class (toxicity) is labelled; the others are masked with -1, so the
+    multi_target loss ignores them and the model keeps toxic-bert's six heads.
+    """
+
+    def __init__(
+        self,
+        train_csv_file="usernames/dataset/train.tsv",
+        test_csv_file="usernames/dataset/dev.tsv",
+        train=True,
+        classes=["toxicity"],
+    ):
+        from detoxify.usernames import text
+
+        frame = pd.read_csv(train_csv_file if train else test_csv_file, sep="\t", keep_default_na=False)
+        self.texts = [text(h) for h in frame["handle"]]
+        self.labels = [int(v) for v in frame["label"]]
+        self.handles = list(frame["handle"])
+        self.classes = classes
+        self.train = train
+
+    def __len__(self):
+        return len(self.texts)
+
+    def __getitem__(self, index):
+        meta = {
+            "multi_target": torch.tensor([self.labels[index]] + [-1] * (len(self.classes) - 1), dtype=torch.int32),
+            "text_id": self.handles[index],
+        }
+        return self.texts[index], meta

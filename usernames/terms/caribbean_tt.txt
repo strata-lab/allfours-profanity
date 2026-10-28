@@ -1,0 +1,29 @@
+# Trinidad and Tobago / Caribbean offensive terms (ALL-181). Approved by the owner on 2026-10-28 as drafted.
+# One term per line; a space joins the words of a phrase. Written for All Fours; same licence as this repository.
+# Add terms here, then rebuild the dataset and retrain (README.md, "Changing the term lists").
+bumbo
+bumbohole
+bombo
+bumbaclot
+bomboclaat
+rassclaat
+rass
+bloodclaat
+lolo
+toto
+totee
+bamsee
+punani
+poonani
+jammet
+jamette
+skettel
+buller
+bullerman
+battyman
+batty boy
+antiman
+coolie
+kiss me ass
+kissmeass
+kmrs
