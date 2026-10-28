@@ -1,5 +1,5 @@
 {
-    "name": "Username_moderation_toxic_bert",
+    "name": "Profanity_compact_text_toxic_bert",
     "n_gpu": 1,
     "batch_size": 32,
     "accumulate_grad_batches": 1,
@@ -8,16 +8,16 @@
         "type": "BERT",
         "args": {
             "num_classes": 6,
-            "model_type": "usernames/base/toxic-bert",
+            "model_type": "profanity/base/toxic-bert",
             "model_name": "BertForSequenceClassification",
             "tokenizer_name": "BertTokenizer"
         }
     },
     "dataset": {
-        "type": "UsernameData",
+        "type": "ProfanityData",
         "args": {
-            "train_csv_file": "usernames/dataset/train.tsv",
-            "test_csv_file": "usernames/dataset/dev.tsv",
+            "train_csv_file": "profanity/dataset/train.tsv",
+            "test_csv_file": "profanity/dataset/dev.tsv",
             "classes": [
                 "toxicity",
                 "severe_toxicity",

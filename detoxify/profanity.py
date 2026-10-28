@@ -1,36 +1,38 @@
-"""Game usernames (All Fours fork addition, ALL-181): decide whether a short handle may be a player's username.
+"""Profanity in compact text (fork addition): handles, tags and short identifiers with no spaces.
 
-A username is 3-20 characters of ``[A-Za-z0-9_]`` with no spaces (``FuckYou_69``, ``Fvck_U``, ``Bumba_Clot``), and
-models trained on comments do badly on handles as written. So a handle is normalised before the model sees it:
+Decides one thing only: is this text profane? It knows nothing about what makes a valid username, tag or slug in any
+particular product (length, charset, uniqueness); callers apply their own rules and use this as one check among them.
+
+Compact text such as ``FuckYou_69``, ``Fvck_U`` or ``Bumba_Clot`` defeats models trained on comments, so it is
+normalised first:
 
 * split on ``_``, on digits and on camelCase, then lowercase (``FuckYou_69`` -> ``fuck you``);
 * leetspeak back to letters: ``0->o 1->i 3->e 4->a 5->s 7->t @->a``. A digit is ambiguous (``69`` in ``FuckYou_69`` is a
   number, ``1`` in ``Sh1t`` is a letter), so both readings are kept;
-* ``xX...Xx`` decoration around a handle is dropped.
+* ``xX...Xx`` decoration around the text is dropped.
 
-``text(handle)`` joins every reading into the one string the model is trained and run on (``fuck you | fuckyou``),
-so training uses upstream's trainer unchanged (one text per example).
+``text(s)`` joins every reading into the one string the model is trained and run on (``fuck you | fuckyou``), so
+training uses upstream's trainer unchanged (one text per example).
 
-A handle is refused when the model's toxicity score reaches the threshold, OR a listed term (usernames/terms) is a
-whole word of it. Terms are never matched as substrings, so "Scunthorpe", "Cocktail" and "Grasshopper" pass.
+A text is profane when the model's toxicity score reaches the release's threshold, OR a listed term (profanity/terms)
+is a whole word of it. Terms are never matched as substrings, so "Scunthorpe", "Cocktail" and "Grasshopper" are not.
 
 Scoring loads a checkpoint converted by upstream's ``convert_weights.py`` through upstream's
-``get_model_and_tokenizer`` (see UsernameModerator).
+``get_model_and_tokenizer`` (see Profanity).
 """
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TERMS_DIR = ROOT / "usernames" / "terms"
+TERMS_DIR = ROOT / "profanity" / "terms"
 TERM_FILES = ("ldnoobw_en.txt", "caribbean_tt.txt")
-META = "usernames.json"   # next to the converted checkpoint: threshold, checkpoint file name, provenance
+META = "profanity.json"   # next to the converted checkpoint: threshold, checkpoint file name, provenance
 
-# --- normalising a handle ---------------------------------------------------------------------------------------
+# --- normalising compact text ---------------------------------------------------------------------------------------
 
 LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a"})
 # A word boundary inside a run of letters: aB (lower to upper), or ABc (the last capital of an acronym starts a word).
@@ -87,7 +89,7 @@ def forms(handle: str) -> list[str]:
 
 
 def text(handle: str) -> str:
-    """The one string the model is trained and run on: every reading of the handle."""
+    """The one string the model is trained and run on: every reading of the text."""
     return " | ".join(forms(handle))
 
 
@@ -124,8 +126,8 @@ def load_terms(terms_dir: Path = TERMS_DIR) -> list[Term]:
 
 
 class Matcher:
-    """Whole-word term match over every reading of a handle: each word, each run of adjacent words ("kiss me ass"),
-    and the handle run together. Never a substring."""
+    """Whole-word term match over every reading of a text: each word, each run of adjacent words ("kiss me ass"),
+    and the text run together. Never a substring."""
 
     def __init__(self, terms: list[Term]):
         self.by_key = {t.key: t for t in terms}
@@ -141,65 +143,22 @@ class Matcher:
         return None
 
 
-# --- the game's generated names ---------------------------------------------------------------------------------
-
-
-def find_username_gen() -> Path:
-    """All Fours' game/account/username_gen.gd: $ALLFOURS_USERNAME_GEN, else the superproject (this repo vendored as
-    allfours/allfours-moderator/allfours-profanity), else a sibling checkout (~/Github/allfours)."""
-    env = os.environ.get("ALLFOURS_USERNAME_GEN")
-    if env:
-        return Path(env)
-    candidates = [ROOT.parents[1] / "game/account/username_gen.gd", ROOT.parent / "allfours/game/account/username_gen.gd"]
-    for c in candidates:
-        if c.exists():
-            return c
-    raise FileNotFoundError("game/account/username_gen.gd not found: set ALLFOURS_USERNAME_GEN to the allfours "
-                            f"checkout's copy (looked in {', '.join(map(str, candidates))})")
-
-
-def generator_words(gd_file: Path | None = None) -> tuple[list[str], list[str]]:
-    """The ADJECTIVES and NOUNS arrays of username_gen.gd, read from the GDScript itself."""
-    path = gd_file or find_username_gen()
-    src = path.read_text(encoding="utf-8")
-
-    def array(name: str) -> list[str]:
-        m = re.search(name + r"\s*:\s*PackedStringArray\s*=\s*\[(.*?)\]", src, re.S)
-        if m is None:
-            raise ValueError(f"{path}: no {name} array")
-        return re.findall(r'"([^"]+)"', m.group(1))
-
-    adjectives, nouns = array("ADJECTIVES"), array("NOUNS")
-    if not adjectives or not nouns:
-        raise ValueError(f"{path}: empty word list")
-    return adjectives, nouns
-
-
-def generated_names(gd_file: Path | None = None) -> list[str]:
-    """Every ADJECTIVE + NOUN, plus each with collision-retry digit tails (the game appends 10..9999) chosen to cover
-    every digit and the leet digits next to a letter."""
-    adjectives, nouns = generator_words(gd_file)
-    names = [a + n for a in adjectives for n in nouns]
-    tails = ("10", "13", "34", "57", "69", "88", "420", "666", "1337", "4321", "7777", "9999")
-    return names + [n + tails[i % len(tails)] for i, n in enumerate(names)] + [n + "69" for n in names]
-
-
 # --- the decision -----------------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Verdict:
-    allowed: bool
-    score: float
-    term: str | None   # the listed term the handle contains as a word, if any
+    profane: bool
+    score: float        # the model's toxicity score for the text's readings
+    term: str | None    # the listed term the text contains as a whole word, if any
 
 
-class UsernameModerator:
-    """A released model directory (usernames/release.py writes it): model.ckpt (upstream's converted format), hf/
-    (config + tokenizer, for offline loading) and usernames.json (threshold, provenance).
+class Profanity:
+    """A released model directory (profanity/release.py writes it): model.ckpt (upstream's converted format), hf/
+    (config + tokenizer, for offline loading) and profanity.json (threshold, provenance).
 
     It loads through upstream's ``get_model_and_tokenizer`` with ``model_type`` pointed at hf/: the checkpoint was
-    trained from the local base path (usernames/base), which does not exist where the model is served."""
+    trained from the local base path (profanity/base), which does not exist where the model is served."""
 
     def __init__(self, model_dir: Path | str, device: str = "cpu", terms_dir: Path = TERMS_DIR):
         import torch
@@ -219,15 +178,20 @@ class UsernameModerator:
         self.torch = torch
         self.matcher = Matcher(load_terms(terms_dir))
 
-    def scores(self, handles: list[str]) -> list[float]:
+    def scores(self, texts: list[str]) -> list[float]:
         with self.torch.no_grad():
-            enc = self.tokenizer([text(h) for h in handles], return_tensors="pt", truncation=True,
+            enc = self.tokenizer([text(t) for t in texts], return_tensors="pt", truncation=True,
                                  padding=True).to(self.device)
             return self.torch.sigmoid(self.model(**enc)[0][:, self.index]).tolist()
 
-    def check(self, handles: list[str]) -> list[Verdict]:
+    def check(self, texts: list[str]) -> list[Verdict]:
         out = []
-        for h, s in zip(handles, self.scores(handles)):
-            hit = self.matcher.match(h)
-            out.append(Verdict(allowed=s < self.threshold and hit is None, score=s, term=hit.text if hit else None))
+        for t, s in zip(texts, self.scores(texts)):
+            hit = self.matcher.match(t)
+            out.append(Verdict(profane=s >= self.threshold or hit is not None, score=s, term=hit.text if hit else None))
         return out
+
+
+def must_allow(path: Path = ROOT / "profanity" / "words" / "must_allow.txt") -> list[str]:
+    """Innocent texts that must never be flagged (training negatives; the threshold is picked above all of them)."""
+    return _lines(path)

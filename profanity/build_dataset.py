@@ -1,7 +1,7 @@
-"""Build the training, dev and test sets of handles from the term lists and word lists (seeded: same files, same rows).
+"""Build the training, dev and test sets of compact texts (handles) from the term lists and word lists (seeded: same files, same rows).
 
-    python usernames/build_dataset.py                                   # writes usernames/dataset/{train,dev,test}.tsv
-    python usernames/build_dataset.py --sample-web2 /usr/share/dict/words   # refresh words/web2_sample.txt (rarely)
+    python profanity/build_dataset.py                                   # writes profanity/dataset/{train,dev,test}.tsv
+    python profanity/build_dataset.py --sample-web2 /usr/share/dict/words   # refresh words/web2_sample.txt (rarely)
 
 Each row is ``handle <TAB> label <TAB> group <TAB> term``; label 1 = offensive.
 
@@ -14,9 +14,9 @@ Each row is ``handle <TAB> label <TAB> group <TAB> term``; label 1 = offensive.
 * The terms are split 80/10/10. A dev/test term's handles never appear in training ("unseen_term" rows measure
   how the model generalises to a term it was never shown); training terms also get fresh renderings in dev/test
   ("seen_term"). Words are split the same way.
-* Held out of all three: the hand-written eval sets (usernames/eval), so they are an honest test.
-* Every name the game's generator can make (detoxify.usernames.generated_names) is a TRAINING negative: the first-launch name must never be
-  refused, so that is a guarantee the model is trained to, not a held-out measurement (the report says so).
+* Held out of all three: the hand-written eval sets (profanity/eval), so they are an honest test.
+* words/must_allow.txt (innocent texts that must never be flagged) are always TRAINING negatives: a guarantee the
+  model is trained to, not a held-out measurement (the report says so).
 """
 from __future__ import annotations
 
@@ -28,12 +28,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # run from anywhere: the repo root holds detoxify/
-from detoxify import usernames as U   # noqa: E402
-from detoxify.usernames import forms  # noqa: E402
+from detoxify import profanity as U   # noqa: E402
+from detoxify.profanity import forms  # noqa: E402
 
-DATA = Path(__file__).resolve().parent   # usernames/
+DATA = Path(__file__).resolve().parent   # profanity/
 SEED = 181
-VALID = re.compile(r"^[A-Za-z0-9_]{3,20}$")
+VALID = re.compile(r"^[A-Za-z0-9_]{3,20}$")   # the shape of compact text rendered: letters, digits, _; 3-20 long
 PREFIXES = ["Big", "Lil", "Mr", "Ms", "The", "Da", "Real", "Its", "Im", "Ur", "Yo", "King", "Queen", "Captain"]
 SUFFIXES = ["Lord", "King", "Boy", "Gyal", "Man", "Face", "Head", "Master", "Pro", "Gamer", "Lover", "Queen", "Ting"]
 TAILS = ["69", "420", "666", "88", "1", "7", "13", "99", "2026", "868", "123", "007"]
@@ -86,7 +86,7 @@ def _obfuscate(word: str, rng: random.Random, harsh: bool) -> str:
 
 
 def render(words: list[str], rng: random.Random, harsh: bool) -> str | None:
-    """One handle from `words`, or None if it would not fit the username rules."""
+    """One compact text from `words`, or None if it would not fit VALID."""
     ws = [_obfuscate(w, rng, harsh) for w in words]
     r = rng.random()
     if r < 0.25:
@@ -200,9 +200,9 @@ def build(seed: int = SEED) -> dict[str, list[tuple[str, int, str, str]]]:
     innocent(names, "negative", 3, handle_words)
     innocent(plain, "negative", 2, handle_words)
 
-    # the generator's names: every one, plain and with collision digits, always in training
-    for h in U.generated_names():
-        rows["train"].append((h, 0, "generator", ""))
+    # must-allow texts: always in training
+    for h in U.must_allow():
+        rows["train"].append((h, 0, "must_allow", ""))
 
     for split in rows:   # one row per handle; a handle that came out both ways keeps the offensive label
         best: dict[str, tuple[str, int, str, str]] = {}
@@ -248,7 +248,7 @@ def main(argv: list[str] | None = None) -> None:
     if a.sample_web2:
         words = sample_web2(a.sample_web2)
         (DATA / "words" / "web2_sample.txt").write_text(
-            "# A deterministic sample of Webster's Second International (1934; public domain), see usernames/LICENSES.md.\n"
+            "# A deterministic sample of Webster's Second International (1934; public domain), see profanity/LICENSES.md.\n"
             + "\n".join(words) + "\n")
         print(f"web2_sample.txt: {len(words)} words")
         return

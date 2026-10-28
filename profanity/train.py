@@ -1,6 +1,6 @@
-"""Run upstream's trainer (train.py, unchanged) on the username config.
+"""Run upstream's trainer (train.py, unchanged) on the compact-text profanity config.
 
-    python usernames/train.py            # = python train.py -c configs/Username_moderation_toxic_bert.json -e 2 --num_workers 0
+    python profanity/train.py            # = python train.py -c configs/Profanity_compact_text_toxic_bert.json -e 2 --num_workers 0
 
 Upstream trains with Trainer(deterministic=True). On Apple-silicon GPUs (MPS) one op in BERT's backward pass has no
 deterministic implementation and raises, so on MPS this launcher makes PyTorch WARN about such ops instead (every other
@@ -22,5 +22,5 @@ if torch.backends.mps.is_available():
 
 import train  # noqa: E402
 
-sys.argv = [sys.argv[0], "-c", "configs/Username_moderation_toxic_bert.json", "-e", "2", "--num_workers", "0", *sys.argv[1:]]
+sys.argv = [sys.argv[0], "-c", "configs/Profanity_compact_text_toxic_bert.json", "-e", "2", "--num_workers", "0", *sys.argv[1:]]
 train.cli_main()

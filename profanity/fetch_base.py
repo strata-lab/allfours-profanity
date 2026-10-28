@@ -1,8 +1,8 @@
 """Fetch the base model, unitary/toxic-bert (Apache-2.0; Detoxify's "original" model), at a pinned revision into
-usernames/base/toxic-bert, which configs/Username_moderation_toxic_bert.json names as its model_type. Pinning it
+profanity/base/toxic-bert, which configs/Profanity_compact_text_toxic_bert.json names as its model_type. Pinning it
 here keeps training reproducible without changing upstream's trainer, which loads model_type by name.
 
-    python usernames/fetch_base.py
+    python profanity/fetch_base.py
 """
 from pathlib import Path
 

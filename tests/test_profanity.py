@@ -1,18 +1,18 @@
-"""Game usernames (All Fours fork addition, ALL-181): the handle normaliser, the whole-word term match, and the
-guarantee that every name All Fours' first-launch generator can make is allowed.
+"""Profanity in compact text (fork addition): the normaliser, the whole-word term match, and the guarantee that no
+must-allow text (profanity/words/must_allow.txt) is flagged.
 
-The model check runs when a released model is present (usernames/models/current, or $ALLFOURS_PROFANITY_MODEL), and is
-SKIPPED, loudly, otherwise. Run: pytest tests/test_usernames.py
+The model check runs when a released model is present (profanity/models/current, or $ALLFOURS_PROFANITY_MODEL), and is
+SKIPPED, loudly, otherwise. Run: pytest tests/test_profanity.py
 """
 import os
 from pathlib import Path
 
 import pytest
 
-from detoxify import usernames as U
-from detoxify.usernames import forms, leet, split_words, text, tokens
+from detoxify import profanity as U
+from detoxify.profanity import forms, leet, split_words, text, tokens
 
-MODEL = Path(os.environ.get("ALLFOURS_PROFANITY_MODEL", Path(__file__).resolve().parents[1] / "usernames/models/current"))
+MODEL = Path(os.environ.get("ALLFOURS_PROFANITY_MODEL", Path(__file__).resolve().parents[1] / "profanity/models/current"))
 
 
 def test_split_on_underscore_digits_and_camel_case():
@@ -92,20 +92,15 @@ def test_substrings_do_not_match():
         assert M.match(h) is None, h
 
 
-def test_generator_lists_parse():
-    adjectives, nouns = U.generator_words()
-    assert "Golden" in adjectives and "Jack" in nouns
-    names = U.generated_names()
-    assert len(names) == 3 * len(adjectives) * len(nouns)
-
-
-def test_no_generated_name_contains_a_listed_term_as_a_word():
+def test_must_allow_list_loads_and_has_no_listed_term_as_a_word():
+    allow = U.must_allow()
+    assert "GoldenJack" in allow and len(allow) == len(set(allow))
     m = U.Matcher(U.load_terms())
-    assert [(n, m.match(n).text) for n in U.generated_names() if m.match(n)] == []
+    assert [(t, m.match(t).text) for t in allow if m.match(t)] == []
 
 
 @pytest.mark.skipif(not (MODEL / U.META).exists(), reason=f"no released model at {MODEL}")
-def test_the_model_allows_every_generated_name():
-    names = U.generated_names()
-    refused = [(n, round(v.score, 3)) for n, v in zip(names, U.UsernameModerator(MODEL).check(names)) if not v.allowed]
-    assert refused == []
+def test_the_model_flags_no_must_allow_text():
+    allow = U.must_allow()
+    flagged = [(t, round(v.score, 3)) for t, v in zip(allow, U.Profanity(MODEL).check(allow)) if v.profane]
+    assert flagged == []

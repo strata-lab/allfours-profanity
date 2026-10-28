@@ -8,6 +8,7 @@
 | `words/web2_sample.txt` | A deterministic sample of `/usr/share/dict/words` (Webster's Second International, 1934, copyright lapsed; as shipped by FreeBSD and macOS) | Public domain |
 | `words/propernames.txt` | `/usr/share/dict/propernames` (FreeBSD and macOS) | Public domain |
 | `words/handle_words.txt`, `eval/*.txt` | Written for All Fours | This repository's licence |
+| `words/must_allow.txt` | Innocent texts that must never be flagged; today All Fours' generated names (from its `username_gen.gd` word lists) | This repository's licence |
 | `dataset/*.tsv` | Generated from the files above by `build_dataset.py` (seeded, reproducible) | Inherits the above; the LDNOOBW-derived rows are CC BY 4.0 |
 
 The base model is [`unitary/toxic-bert`](https://huggingface.co/unitary/toxic-bert), revision
