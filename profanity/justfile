@@ -12,7 +12,8 @@ bucket := env("PROFANITY_BUCKET", "gs://allfours-moderator-models")
 model := env("PROFANITY_MODEL", "allfours-profanity")
 repo := env("PROFANITY_REPO", "strata-lab/allfours-profanity")
 train_sa := env("PROFANITY_TRAIN_SA", "allfours-profanity-train") + "@" + project + ".iam.gserviceaccount.com"
-# Google's prebuilt PyTorch training image: the job downloads this repo at a pushed commit and runs the Makefile on it.
+# Google's prebuilt PyTorch training image, for its GPU driver, Python and make: the job downloads this repo at a pushed
+# commit and runs the Makefile on it, which builds its own .venv.
 train_image := env("PROFANITY_TRAIN_IMAGE", "us-docker.pkg.dev/vertex-ai/training/pytorch-gpu.2-4.py310:latest")
 machine := env("PROFANITY_MACHINE", "g2-standard-8")
 gpu := env("PROFANITY_GPU", "NVIDIA_L4")
@@ -71,9 +72,11 @@ train-vertex:
     mkdir -p /src && cd /src
     python -c 'import sys, urllib.request; sys.stdout.buffer.write(urllib.request.urlopen(sys.argv[1]).read())' \\
       https://codeload.github.com/{repo}/tar.gz/{commit} | tar xz --strip-components=1 || exit 1
-    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
-    make -C profanity PY=python install base train release || exit 1
-    make -C profanity PY=python eval; gate=$?
+    nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+    # The image's own packages are built for numpy 1, so the Makefile's setup builds a clean .venv, as on a laptop.
+    python -m pip install -q uv && export PATH="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))'):$PATH"
+    make -C profanity setup base train release || exit 1
+    make -C profanity eval; gate=$?
     make -C profanity package OUT={out} && echo {repo}@{commit} > {out}/SOURCE || exit 1
     echo "outputs in {out} (eval exit $gate)"
     exit $gate

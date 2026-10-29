@@ -79,7 +79,6 @@ on it.
 | `release` | Upstream's `convert_weights.py` on the newest checkpoint into `models/current/`, then pick the threshold on dev: best F1, at most 2% of innocent dev texts flagged, no must-allow text flagged |
 | `eval` | Write `reports/eval.md`; fails if a must-allow or hand-written innocent text is flagged |
 | `test` | `tests/test_profanity.py` |
-| `install` | What `setup` installs, into the current Python instead (a container that already has torch: `PY=python`) |
 | `package` | Copy the release and its report into `OUT` (`OUT/model/`, `OUT/eval.md`), the layout `just publish` takes |
 
 Weights (`base/`, `models/`) are never committed.
@@ -93,7 +92,7 @@ Fours' Google Cloud project (the first caller); the `PROFANITY_*` environment va
 | Recipe | What it does |
 | --- | --- |
 | `setup` | Once: the Vertex AI API, the private bucket, and the training job's service account, which may write only under `<bucket>/training/` |
-| `train-vertex` | A custom job on 1 NVIDIA L4 (g2-standard-8, about $1 a run) in Google's prebuilt PyTorch image. It downloads this repo at the pushed `HEAD` commit and runs `make install base train release eval package`, into `<bucket>/training/<run>/`. The eval's gate is the job's exit status |
+| `train-vertex` | A custom job on 1 NVIDIA L4 (g2-standard-8, about $1 a run) in Google's prebuilt PyTorch image. It downloads this repo at the pushed `HEAD` commit and runs `make setup base train release eval package`, into `<bucket>/training/<run>/`. The eval's gate is the job's exit status |
 | `status <run>` / `logs <run>` | The job's state, and what it printed |
 | `fetch <run>` | Download the run to `runs/<run>/` (gitignored) and show its verdict |
 | `publish <dir>` | Register a packaged release (`<dir>/model/`, `<dir>/eval.md`) as a new version of the registry model. Its files go to `<bucket>/<dataset hash>-<weights hash>/`, never overwritten, with the report and `SHA256SUMS`; labels carry the threshold, hashes and source commit |

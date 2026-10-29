@@ -4,15 +4,12 @@ ROOT := $(abspath ..)
 PY ?= $(ROOT)/.venv/bin/python
 DEPS := -e ".[dev]" "transformers>=4.57,<5" "safetensors>=0.6"
 
-.PHONY: help setup install base dataset train release eval test package
+.PHONY: help setup base dataset train release eval test package
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-9s %s\n", $$1, $$2}'
 
 setup: ## Create .venv with upstream's dev extras (pytorch-lightning, datasets, ...) and transformers 4.x
 	cd $(ROOT) && uv venv -q --python 3.12 .venv && uv pip install -q --python .venv $(DEPS)
-
-install: ## Install the same into the current Python instead (a container that already has torch: make install PY=python)
-	cd $(ROOT) && $(PY) -m pip install -q $(DEPS)
 
 base: ## Fetch the base model, unitary/toxic-bert at a pinned revision, into base/toxic-bert
 	$(PY) fetch_base.py
