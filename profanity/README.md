@@ -100,5 +100,9 @@ Fours' Google Cloud project (the first caller); the `PROFANITY_*` environment va
 | `promote <version> [alias]` | Move an alias (default `production`) to a version |
 | `versions` | Every version, with its labels and aliases |
 
+When the region has no on-demand GPU free (L4s often run out), run it on a Spot VM, here a T4:
+`PROFANITY_SPOT=1 PROFANITY_MACHINE=n1-standard-8 PROFANITY_GPU=NVIDIA_TESLA_T4 just train-vertex`, and
+`PROFANITY_TRAIN_REGION` picks another region. A Spot VM costs less but can be stopped, and then the run starts over.
+
 A caller pins a version (`allfours-profanity@<id>`) and its `SHA256SUMS`, and serves the files itself; nothing serves
 from the registry. All Fours does this with `make moderator-pin` in its own repo.

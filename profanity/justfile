@@ -16,6 +16,10 @@ train_sa := env("PROFANITY_TRAIN_SA", "allfours-profanity-train") + "@" + projec
 train_image := env("PROFANITY_TRAIN_IMAGE", "us-docker.pkg.dev/vertex-ai/training/pytorch-gpu.2-4.py310:latest")
 machine := env("PROFANITY_MACHINE", "g2-standard-8")
 gpu := env("PROFANITY_GPU", "NVIDIA_L4")
+# Where the job runs (the registry stays in `region`), and PROFANITY_SPOT=1 for a Spot VM: cheaper, and it can run on
+# Spot quota when on-demand GPUs are out, but Google may stop it, and then the run starts over.
+train_region := env("PROFANITY_TRAIN_REGION", region)
+spot := env("PROFANITY_SPOT", "")
 # Vertex requires a serving image on every model version, but nothing serves from the registry: each caller serves the
 # files itself. So a version records Google's public Cloud Run sample image, as a placeholder.
 serving_image := env("PROFANITY_SERVING_IMAGE", "us-docker.pkg.dev/cloudrun/container/hello:latest")
@@ -23,6 +27,7 @@ serving_image := env("PROFANITY_SERVING_IMAGE", "us-docker.pkg.dev/cloudrun/cont
 export CLOUDSDK_PYTHON := env("CLOUDSDK_PYTHON", `for p in python3.13 python3.12 python3.11 python3.10 python3; do command -v $p && break; done`)
 
 g := "--project " + project + " --region " + region + " --quiet"
+gt := "--project " + project + " --region " + train_region + " --quiet"
 
 default:
     @just --list
@@ -78,21 +83,23 @@ train-vertex:
         "replicaCount": 1,
         "containerSpec": {"imageUri": "{{ train_image }}", "command": ["bash", "-c"], "args": [script]},
     }]}
+    if "{{ spot }}" == "1":
+        spec["scheduling"] = {"strategy": "SPOT"}
     json.dump(spec, open(config, "w"))
     EOF
-    gcloud ai custom-jobs create {{ g }} --display-name "{{ model }}-$run" --service-account {{ train_sa }} \
+    gcloud ai custom-jobs create {{ gt }} --display-name "{{ model }}-$run" --service-account {{ train_sa }} \
       --config "$config" --format 'value(name)'
     echo "run $run (commit ${commit:0:12}). Then: just status $run, just fetch $run"
 
 # The state of a training run's job
 status run:
-    gcloud ai custom-jobs list {{ g }} --filter 'displayName={{ model }}-{{ run }}' --format 'table(state,createTime,startTime,endTime,error.message)'
+    gcloud ai custom-jobs list {{ gt }} --filter 'displayName={{ model }}-{{ run }}' --format 'table(state,createTime,startTime,endTime,error.message)'
 
 # A training run's job log (what the container printed)
 logs run:
     #!/usr/bin/env bash
     set -euo pipefail
-    id="$(gcloud ai custom-jobs list {{ g }} --filter 'displayName={{ model }}-{{ run }}' --format 'value(name.basename())')"
+    id="$(gcloud ai custom-jobs list {{ gt }} --filter 'displayName={{ model }}-{{ run }}' --format 'value(name.basename())')"
     [ -n "$id" ] || { echo "no job {{ model }}-{{ run }}" >&2; exit 1; }
     gcloud logging read "resource.type=\"ml_job\" AND resource.labels.job_id=\"$id\" AND NOT textPayload:\"provisioning\"" \
       --project {{ project }} --order asc --limit 500 --format 'value(textPayload)'
