@@ -10,7 +10,9 @@ Each row is ``handle <TAB> label <TAB> group <TAB> term``; label 1 = offensive.
   normaliser does NOT undo (u->v, ck->k, f->ph, a doubled letter, a dropped vowel) as well as leet it does.
 * Innocent handles render everyday words, first names and dictionary words the same ways, leet included, so the
   model cannot learn "leet means bad". **Hard negatives** are dictionary words that contain a short term
-  (cocktail, assassin, therapist): the Scunthorpe problem.
+  (cocktail, assassin, therapist): the Scunthorpe problem. **Near misses** are dictionary words that START like a
+  term without containing one (shine, peninsula, bullion, cunning, dictionary): the model must not flag a word
+  for its first letters.
 * The terms are split 80/10/10. A dev/test term's handles never appear in training ("unseen_term" rows measure
   how the model generalises to a term it was never shown); training terms also get fresh renderings in dev/test
   ("seen_term"). Words are split the same way.
@@ -153,6 +155,15 @@ def _contains_long_term(word: str, keys: set[str]) -> bool:
     return any(len(k) >= 5 and k in word for k in keys)
 
 
+def _stems(keys: set[str]) -> set[str]:
+    """The opening letters a near miss shares with a term: 4 of a 5+ letter term, 3 of a 4-letter one."""
+    return {k[:4] if len(k) >= 5 else k[:3] for k in keys if len(k) >= 4 and k.isalpha()}
+
+
+def _near_miss(word: str, keys: set[str], stems: set[str]) -> bool:
+    return any(word.startswith(st) for st in stems) and not any(k in word for k in keys if len(k) >= 3)
+
+
 def build(seed: int = SEED) -> dict[str, list[tuple[str, int, str, str]]]:
     rng = random.Random(seed)
     term_list = U.load_terms()
@@ -183,7 +194,9 @@ def build(seed: int = SEED) -> dict[str, list[tuple[str, int, str, str]]]:
     dictionary = sorted(set(w for w in word_lines("web2_sample.txt")
                             if not _is_term_word(w, keys) and not _contains_long_term(w, keys)))
     hard = sorted(w for w in dictionary if any(len(k) <= 4 and k in w for k in keys))
-    plain = [w for w in dictionary if w not in set(hard)]
+    stems = _stems(keys)
+    near = sorted(w for w in dictionary if w not in set(hard) and _near_miss(w, keys, stems))
+    plain = [w for w in dictionary if w not in set(hard) | set(near)]
 
     def innocent(pool: list[str], group: str, n_each: int, pair_with: list[str] | None = None) -> None:
         for w in pool:
@@ -196,6 +209,7 @@ def build(seed: int = SEED) -> dict[str, list[tuple[str, int, str, str]]]:
                     add(split, h, 0, group, "")
 
     innocent(hard, "hard_negative", 5, handle_words)
+    innocent(near, "near_miss", 4, handle_words)
     innocent(handle_words, "negative", 25, handle_words + names)
     innocent(names, "negative", 3, handle_words)
     innocent(plain, "negative", 2, handle_words)
@@ -232,12 +246,15 @@ def read(path: Path) -> list[tuple[str, int, str, str]]:
 
 def sample_web2(src: Path, n: int = 12000, seed: int = SEED) -> list[str]:
     """A deterministic sample of a web2 word list: lowercase words of 3-10 letters, plus every word that contains a
-    short (<= 4 letter) term, the hard negatives. Offensive words themselves are filtered at build time."""
+    short (<= 4 letter) term (the hard negatives) and every word that starts like a term (the near misses). Offensive
+    words themselves are filtered at build time."""
     words = sorted({w.strip() for w in src.read_text().splitlines() if re.fullmatch(r"[a-z]{3,10}", w.strip())})
     keys = {t.key for t in U.load_terms()}
     hard = [w for w in words if any(len(k) <= 4 and k in w for k in keys)]
-    rest = [w for w in words if w not in set(hard)]
-    return sorted(set(hard) | set(random.Random(seed).sample(rest, n)))
+    stems = _stems(keys)
+    near = [w for w in words if _near_miss(w, keys, stems)]
+    rest = [w for w in words if w not in set(hard) | set(near)]
+    return sorted(set(hard) | set(near) | set(random.Random(seed).sample(rest, n)))
 
 
 def main(argv: list[str] | None = None) -> None:
