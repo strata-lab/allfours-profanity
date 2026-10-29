@@ -1,0 +1,162 @@
+# Cloud operations for the profanity model (fork addition): train it on a Vertex AI GPU, fetch a run, publish a release
+# as a version in the Vertex AI Model Registry, move an alias. Building is the Makefile's job (setup, dataset, train,
+# release, eval, package); these recipes run it on a GPU, or ship what it built. Run from this folder: `just <recipe>`.
+#
+# The defaults are All Fours' Google Cloud project, its first caller; another project overrides them through the
+# PROFANITY_* environment variables.
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+project := env("PROFANITY_PROJECT", "allfours")
+region := env("PROFANITY_REGION", "us-central1")
+bucket := env("PROFANITY_BUCKET", "gs://allfours-moderator-models")
+model := env("PROFANITY_MODEL", "allfours-profanity")
+repo := env("PROFANITY_REPO", "strata-lab/allfours-profanity")
+train_sa := env("PROFANITY_TRAIN_SA", "allfours-profanity-train") + "@" + project + ".iam.gserviceaccount.com"
+# Google's prebuilt PyTorch training image: the job downloads this repo at a pushed commit and runs the Makefile on it.
+train_image := env("PROFANITY_TRAIN_IMAGE", "us-docker.pkg.dev/vertex-ai/training/pytorch-gpu.2-4.py310:latest")
+machine := env("PROFANITY_MACHINE", "g2-standard-8")
+gpu := env("PROFANITY_GPU", "NVIDIA_L4")
+# Vertex requires a serving image on every model version, but nothing serves from the registry: each caller serves the
+# files itself. So a version records Google's public Cloud Run sample image, as a placeholder.
+serving_image := env("PROFANITY_SERVING_IMAGE", "us-docker.pkg.dev/cloudrun/container/hello:latest")
+# gcloud needs Python 3.10 or newer.
+export CLOUDSDK_PYTHON := env("CLOUDSDK_PYTHON", `for p in python3.13 python3.12 python3.11 python3.10 python3; do command -v $p && break; done`)
+
+g := "--project " + project + " --region " + region + " --quiet"
+
+default:
+    @just --list
+
+# One-time, idempotent: the Vertex AI API, the private bucket, the training account (writes only <bucket>/training/)
+setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    p=(--project {{ project }} --quiet)
+    gcloud services enable aiplatform.googleapis.com "${p[@]}"
+    gcloud storage buckets describe {{ bucket }} "${p[@]}" >/dev/null 2>&1 \
+      || gcloud storage buckets create {{ bucket }} --location {{ region }} --uniform-bucket-level-access \
+           --public-access-prevention "${p[@]}"
+    sa={{ train_sa }}
+    gcloud iam service-accounts describe "$sa" "${p[@]}" >/dev/null 2>&1 \
+      || { gcloud iam service-accounts create "${sa%%@*}" --display-name "{{ model }} (Vertex AI training job)" "${p[@]}"; sleep 15; }
+    name={{ bucket }}; name="${name#gs://}"
+    gcloud storage buckets add-iam-policy-binding {{ bucket }} --member "serviceAccount:$sa" --role roles/storage.objectUser \
+      --condition "expression=resource.name.startsWith(\"projects/_/buckets/$name/objects/training/\"),title=training-outputs-only" \
+      "${p[@]}" >/dev/null
+    # Cloud Storage FUSE (how the job writes to /gcs/...) lists the bucket to mount it.
+    gcloud storage buckets add-iam-policy-binding {{ bucket }} --member "serviceAccount:$sa" \
+      --role roles/storage.legacyBucketReader --condition=None "${p[@]}" >/dev/null
+    echo "ready: just train-vertex"
+
+# Train, release and evaluate the pushed HEAD commit on a Vertex AI GPU (1 L4, ~$1/run) into <bucket>/training/<run>/
+train-vertex:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -z "$(git status --porcelain)" ] || { echo "commit first: the job trains a pushed commit, not this working tree" >&2; exit 1; }
+    commit="$(git rev-parse HEAD)"
+    git fetch -q origin && [ -n "$(git branch -r --contains "$commit")" ] || { echo "push $commit first" >&2; exit 1; }
+    run="$(date -u +%Y%m%d-%H%M%S)"; out="{{ bucket }}/training/$run"; out="/gcs/${out#gs://}"
+    config="$(mktemp)"; trap 'rm -f "$config"' EXIT
+    python3 - "$config" "$commit" "$out" <<'EOF'
+    import json, sys
+    config, commit, out = sys.argv[1:]
+    repo = "{{ repo }}"
+    # The eval's exit status (a must-allow or hand-written innocent text flagged) is the job's, but the outputs are kept.
+    script = f"""set -uo pipefail
+    mkdir -p /src && cd /src
+    python -c 'import sys, urllib.request; sys.stdout.buffer.write(urllib.request.urlopen(sys.argv[1]).read())' \\
+      https://codeload.github.com/{repo}/tar.gz/{commit} | tar xz --strip-components=1 || exit 1
+    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+    make -C profanity PY=python install base train release || exit 1
+    make -C profanity PY=python eval; gate=$?
+    make -C profanity package OUT={out} && echo {repo}@{commit} > {out}/SOURCE || exit 1
+    echo "outputs in {out} (eval exit $gate)"
+    exit $gate
+    """
+    spec = {"workerPoolSpecs": [{
+        "machineSpec": {"machineType": "{{ machine }}", "acceleratorType": "{{ gpu }}", "acceleratorCount": 1},
+        "replicaCount": 1,
+        "containerSpec": {"imageUri": "{{ train_image }}", "command": ["bash", "-c"], "args": [script]},
+    }]}
+    json.dump(spec, open(config, "w"))
+    EOF
+    gcloud ai custom-jobs create {{ g }} --display-name "{{ model }}-$run" --service-account {{ train_sa }} \
+      --config "$config" --format 'value(name)'
+    echo "run $run (commit ${commit:0:12}). Then: just status $run, just fetch $run"
+
+# The state of a training run's job
+status run:
+    gcloud ai custom-jobs list {{ g }} --filter 'displayName={{ model }}-{{ run }}' --format 'table(state,createTime,startTime,endTime,error.message)'
+
+# A training run's job log (what the container printed)
+logs run:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    id="$(gcloud ai custom-jobs list {{ g }} --filter 'displayName={{ model }}-{{ run }}' --format 'value(name.basename())')"
+    [ -n "$id" ] || { echo "no job {{ model }}-{{ run }}" >&2; exit 1; }
+    gcloud logging read "resource.type=\"ml_job\" AND resource.labels.job_id=\"$id\" AND NOT textPayload:\"provisioning\"" \
+      --project {{ project }} --order asc --limit 500 --format 'value(textPayload)'
+
+# Download a training run to runs/<run>/ and show its evaluation verdict
+fetch run:
+    mkdir -p runs
+    gcloud storage cp -r {{ bucket }}/training/{{ run }} runs/ --project {{ project }}
+    cat runs/{{ run }}/SOURCE
+    grep -E '^\| \*\*Verdict|^\* Flagged' runs/{{ run }}/eval.md || true
+    @echo "review runs/{{ run }}/eval.md, then: just publish runs/{{ run }}"
+
+# Its files go to <bucket>/<dataset hash>-<weights hash>/, never overwritten, with SHA256SUMS for callers to pin.
+# Register a packaged release (DIR/model/ + DIR/eval.md) as a new version in the Vertex AI Model Registry
+publish dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d="{{ dir }}"; m="$d/model"
+    for f in model.ckpt profanity.json hf/config.json hf/vocab.txt; do
+      [ -f "$m/$f" ] || { echo "$m/$f missing: make release package OUT=$d" >&2; exit 1; }
+    done
+    [ -f "$d/eval.md" ] || { echo "$d/eval.md missing: make eval package OUT=$d" >&2; exit 1; }
+    meta() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$m/profanity.json" "$1"; }
+    dataset="$(meta dataset_sha256 | cut -c1-12)"; weights="$(shasum -a 256 "$m/model.ckpt" | cut -c1-12)"
+    threshold="$(meta threshold)"
+    if [ -f "$d/SOURCE" ]; then source="$(cat "$d/SOURCE")"
+    else source="{{ repo }}@$(git rev-parse HEAD)$([ -z "$(git status --porcelain)" ] || echo -dirty)"; fi
+    folder="{{ bucket }}/$dataset-$weights"
+    if gcloud ai models list-version {{ model }} {{ g }} --format 'value(artifactUri)' 2>/dev/null | sed 's#/$##' | grep -qx "$folder"; then
+      echo "$folder is already a version of {{ model }} (versions are never overwritten)" >&2; exit 1
+    fi
+    (cd "$m" && shasum -a 256 model.ckpt profanity.json hf/*) > "$d/SHA256SUMS"
+    gcloud storage cp -r "$m"/* "$folder/" --project {{ project }}
+    gcloud storage cp "$d/eval.md" "$d/SHA256SUMS" "$folder/" --project {{ project }}
+    commit="${source##*@}"
+    args=(--display-name {{ model }} --artifact-uri "$folder/" --container-image-uri {{ serving_image }}
+          --labels "dataset=$dataset,weights=$weights,threshold=$(echo "$threshold" | tr . -),source=${commit:0:12}"
+          --version-description "$source; threshold $threshold; dev F1 $(meta dev_f1), dev false-positive rate $(meta dev_fpr); base $(meta base); report $folder/eval.md; the serving image is a placeholder")
+    if gcloud ai models describe {{ model }} {{ g }} >/dev/null 2>&1; then
+      gcloud ai models upload "${args[@]}" --parent-model "projects/{{ project }}/locations/{{ region }}/models/{{ model }}" {{ g }}
+    else
+      gcloud ai models upload "${args[@]}" --model-id {{ model }} \
+        --description "Profanity in compact text ({{ repo }}, a fork of unitaryai/detoxify)" {{ g }}
+    fi
+    version="$(gcloud ai models list-version {{ model }} {{ g }} --format 'value(versionId)' --sort-by '~versionCreateTime' --limit 1)"
+    uri="$(gcloud ai models describe "{{ model }}@$version" {{ g }} --format 'value(artifactUri)')"
+    [ "${uri%/}" = "$folder" ] || { echo "version $version points at $uri, expected $folder" >&2; exit 1; }
+    echo "published {{ model }}@$version ($folder)"
+
+# gcloud has no alias command: this calls the registry's mergeVersionAliases (a leading "-" removes an alias).
+# Move an alias (default production) to a version
+promote version alias="production":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    api="https://{{ region }}-aiplatform.googleapis.com/v1/projects/{{ project }}/locations/{{ region }}/models/{{ model }}"
+    token="$(gcloud auth print-access-token)"
+    merge() { curl -fsS -X POST -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+                -d "{\"versionAliases\":[\"$2\"]}" "$api@$1:mergeVersionAliases" >/dev/null; }
+    current="$(gcloud ai models describe "{{ model }}@{{ alias }}" {{ g }} --format 'value(versionId)' 2>/dev/null || true)"
+    [ "$current" != "{{ version }}" ] || { echo "{{ model }}@{{ version }} is already {{ alias }}"; exit 0; }
+    [ -z "$current" ] || merge "$current" "-{{ alias }}"
+    merge "{{ version }}" "{{ alias }}"
+    echo "{{ model }}: {{ alias }} moved ${current:+from $current }to {{ version }}"
+
+# Every version, with its labels and aliases
+versions:
+    gcloud ai models list-version {{ model }} {{ g }} --format 'table(versionId,versionAliases.list(),labels,versionCreateTime)'

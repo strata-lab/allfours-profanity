@@ -2,13 +2,17 @@
 # Every target runs upstream's tooling where there is one (train.py, convert_weights.py) and only adds the profanity data.
 ROOT := $(abspath ..)
 PY ?= $(ROOT)/.venv/bin/python
+DEPS := -e ".[dev]" "transformers>=4.57,<5" "safetensors>=0.6"
 
-.PHONY: help setup base dataset train release eval test
+.PHONY: help setup install base dataset train release eval test package
 help: ## List targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-9s %s\n", $$1, $$2}'
 
 setup: ## Create .venv with upstream's dev extras (pytorch-lightning, datasets, ...) and transformers 4.x
-	cd $(ROOT) && uv venv -q --python 3.12 .venv && uv pip install -q --python .venv -e ".[dev]" "transformers>=4.57,<5" "safetensors>=0.6"
+	cd $(ROOT) && uv venv -q --python 3.12 .venv && uv pip install -q --python .venv $(DEPS)
+
+install: ## Install the same into the current Python instead (a container that already has torch: make install PY=python)
+	cd $(ROOT) && $(PY) -m pip install -q $(DEPS)
 
 base: ## Fetch the base model, unitary/toxic-bert at a pinned revision, into base/toxic-bert
 	$(PY) fetch_base.py
@@ -27,3 +31,7 @@ eval: ## Write reports/eval.md from models/current; fails if any must-allow or h
 
 test: ## The profanity tests (tests/test_profanity.py); the model check runs once models/current exists
 	cd $(ROOT) && $(PY) -m pytest -q -rs tests/test_profanity.py
+
+package: ## Copy the release and its report into OUT (OUT/model/, OUT/eval.md), the layout `just publish` takes
+	@test -n "$(OUT)" || { echo "usage: make package OUT=<dir>" >&2; exit 1; }
+	rm -rf "$(OUT)/model" && mkdir -p "$(OUT)" && cp -r models/current "$(OUT)/model" && cp reports/eval.md "$(OUT)/eval.md"

@@ -18,7 +18,7 @@ configs or the existing data loaders changes. The fork only adds:
 | `configs/Profanity_compact_text_toxic_bert.json` | A training config for upstream's `train.py`: toxic-bert, six heads, compact-text data |
 | `src/data_loaders.py` → `ProfanityData` | A dataset class (appended) that reads `dataset/*.tsv`; only `toxicity` is labelled, the other heads are masked (-1) |
 | `detoxify/profanity.py` | The normaliser, the whole-word term match, and `Profanity`: `check(texts)` → `Verdict(profane, score, term)` |
-| `profanity/` | This folder: term lists, word lists, eval sets, dataset, scripts, report |
+| `profanity/` | This folder: term lists, word lists, eval sets, dataset, scripts, report; its `Makefile` builds, its `justfile` trains on Vertex AI and publishes |
 | `tests/test_profanity.py` | Tests for all of the above |
 
 ```python
@@ -79,6 +79,26 @@ on it.
 | `release` | Upstream's `convert_weights.py` on the newest checkpoint into `models/current/`, then pick the threshold on dev: best F1, at most 2% of innocent dev texts flagged, no must-allow text flagged |
 | `eval` | Write `reports/eval.md`; fails if a must-allow or hand-written innocent text is flagged |
 | `test` | `tests/test_profanity.py` |
+| `install` | What `setup` installs, into the current Python instead (a container that already has torch: `PY=python`) |
+| `package` | Copy the release and its report into `OUT` (`OUT/model/`, `OUT/eval.md`), the layout `just publish` takes |
 
-Weights (`base/`, `models/`) are never committed. Where a release is hosted is up to whoever deploys it: All Fours
-registers each one as a version in its Vertex AI Model Registry (allfours: `make moderator-publish`).
+Weights (`base/`, `models/`) are never committed.
+
+## Training and publishing on Google Cloud (`just <recipe>`, from this folder)
+
+A training run saturates a laptop's GPU, so a release is trained on a Vertex AI GPU and published to the Vertex AI
+Model Registry. The `justfile` only runs the `Makefile` somewhere else, or ships what it built. Its defaults are All
+Fours' Google Cloud project (the first caller); the `PROFANITY_*` environment variables point it at another.
+
+| Recipe | What it does |
+| --- | --- |
+| `setup` | Once: the Vertex AI API, the private bucket, and the training job's service account, which may write only under `<bucket>/training/` |
+| `train-vertex` | A custom job on 1 NVIDIA L4 (g2-standard-8, about $1 a run) in Google's prebuilt PyTorch image. It downloads this repo at the pushed `HEAD` commit and runs `make install base train release eval package`, into `<bucket>/training/<run>/`. The eval's gate is the job's exit status |
+| `status <run>` / `logs <run>` | The job's state, and what it printed |
+| `fetch <run>` | Download the run to `runs/<run>/` (gitignored) and show its verdict |
+| `publish <dir>` | Register a packaged release (`<dir>/model/`, `<dir>/eval.md`) as a new version of the registry model. Its files go to `<bucket>/<dataset hash>-<weights hash>/`, never overwritten, with the report and `SHA256SUMS`; labels carry the threshold, hashes and source commit |
+| `promote <version> [alias]` | Move an alias (default `production`) to a version |
+| `versions` | Every version, with its labels and aliases |
+
+A caller pins a version (`allfours-profanity@<id>`) and its `SHA256SUMS`, and serves the files itself; nothing serves
+from the registry. All Fours does this with `make moderator-pin` in its own repo.

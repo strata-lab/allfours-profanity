@@ -1,3 +1,5 @@
 # The pinned base model (fetch_base.py) and the converted model (release.py): weights never go in git.
 base/
 models/
+# Training runs fetched from Vertex AI (just fetch): copies of a release, never committed.
+runs/
