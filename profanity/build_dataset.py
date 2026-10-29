@@ -216,7 +216,7 @@ def build(seed: int = SEED) -> dict[str, list[tuple[str, int, str, str]]]:
     innocent(plain, "negative", 2, handle_words)
 
     # random strings: generated IDs and default names must not look profane
-    for h in random_strings(rng, 12000, keys):
+    for h in random_strings(rng, 3000, keys):   # 12000 (round 4) made them 13% of training and blunted the scores
         add(_bucket("random:" + h), h, 0, "random", "")
 
     # must-allow texts: always in training
