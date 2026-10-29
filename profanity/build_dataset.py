@@ -12,7 +12,8 @@ Each row is ``handle <TAB> label <TAB> group <TAB> term``; label 1 = offensive.
   model cannot learn "leet means bad". **Hard negatives** are dictionary words that contain a short term
   (cocktail, assassin, therapist): the Scunthorpe problem. **Near misses** are dictionary words that START like a
   term without containing one (shine, peninsula, bullion, cunning, dictionary): the model must not flag a word
-  for its first letters.
+  for its first letters. **Random strings** (letter salad in mixed or one case, with or without digits, as systems
+  generate IDs and default names: WqfyfQvdEi, xk3pq9) are innocent too, unless one happens to contain a term.
 * The terms are split 80/10/10. A dev/test term's handles never appear in training ("unseen_term" rows measure
   how the model generalises to a term it was never shown); training terms also get fresh renderings in dev/test
   ("seen_term"). Words are split the same way.
@@ -214,6 +215,10 @@ def build(seed: int = SEED) -> dict[str, list[tuple[str, int, str, str]]]:
     innocent(names, "negative", 3, handle_words)
     innocent(plain, "negative", 2, handle_words)
 
+    # random strings: generated IDs and default names must not look profane
+    for h in random_strings(rng, 12000, keys):
+        add(_bucket("random:" + h), h, 0, "random", "")
+
     # must-allow texts: always in training
     for h in U.must_allow():
         rows["train"].append((h, 0, "must_allow", ""))
@@ -225,6 +230,23 @@ def build(seed: int = SEED) -> dict[str, list[tuple[str, int, str, str]]]:
                 best[r[0]] = r
         rows[split] = sorted(best.values())
     return rows
+
+
+def random_strings(rng: random.Random, n: int, keys: set[str]) -> list[str]:
+    """`n` random compact strings: mixed-case letters (like Nakama's default names), one case, or letters and digits.
+    None contains a term of 3+ letters, in any of its readings."""
+    lower, upper, digits = "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "0123456789"
+    pools = (lower + upper, lower, upper, lower + digits, lower + upper + digits)
+    out: set[str] = set()
+    while len(out) < n:
+        pool = rng.choice(pools)
+        h = "".join(rng.choice(pool) for _ in range(rng.randint(6, 14)))
+        if not VALID.match(h):
+            continue
+        if any(k in f.replace(" ", "") for f in forms(h) for k in keys if len(k) >= 3):
+            continue
+        out.add(h)
+    return sorted(out)
 
 
 def write(rows: dict[str, list[tuple[str, int, str, str]]], out: Path) -> None:

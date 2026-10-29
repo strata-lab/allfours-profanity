@@ -123,6 +123,19 @@ def main() -> None:
                         ("seen_term", "Fresh spellings of terms the model trained on, plus all innocent rows.")):
         section(f"Test split: {group.replace('_', ' ')}s",
                 [(r[0], r[1]) for r in test if r[2] in (group, "negative", "hard_negative")], note)
+    # Nakama-style random default names (10 mixed-case letters), from a seed the dataset never used
+    import random as _random
+
+    keys = {t.key for t in U.load_terms()}
+    rnd = _random.Random(20261028)
+    salad = []
+    while len(salad) < 1000:
+        h = "".join(rnd.choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") for _ in range(10))
+        if not any(k in f.replace(" ", "") for f in U.forms(h) for k in keys if len(k) >= 3):
+            salad.append(h)
+    section("Random default names", [(h, 0) for h in salad],
+            "1000 random 10-letter mixed-case names like Nakama's defaults (`WqfyfQvdEi`), none containing a term, from "
+            "a seed the dataset never used. All innocent, so only the false-positive rate means anything here.")
     hr = section("Hand-written handles", hand,
                  f"{len(good)} innocent (many contain an offensive substring: {', '.join(REQUIRED_INNOCENT)}, ...) and "
                  f"{len(bad)} offensive, written by hand in `profanity/eval/` and never trained on.")
