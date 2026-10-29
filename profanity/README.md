@@ -79,6 +79,6 @@ on it.
 | `release` | Upstream's `convert_weights.py` on the newest checkpoint into `models/current/`, then pick the threshold on dev: best F1, at most 2% of innocent dev texts flagged, no must-allow text flagged |
 | `eval` | Write `reports/eval.md`; fails if a must-allow or hand-written innocent text is flagged |
 | `test` | `tests/test_profanity.py` |
-| `publish` | Upload `models/current` to `gs://allfours-moderator-models` and print the hashes a consumer pins |
 
-Weights (`base/`, `models/`) are never committed.
+Weights (`base/`, `models/`) are never committed. Where a release is hosted is up to whoever deploys it: All Fours
+registers each one as a version in its Vertex AI Model Registry (allfours: `make moderator-publish`).

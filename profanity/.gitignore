@@ -1,4 +1,3 @@
-# The pinned base model (fetch_base.py) and the converted model (release.py): weights never go in git. The published
-# model lives in gs://allfours-moderator-models (make publish).
+# The pinned base model (fetch_base.py) and the converted model (release.py): weights never go in git.
 base/
 models/
