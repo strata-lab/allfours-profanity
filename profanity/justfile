@@ -98,19 +98,20 @@ train-vertex:
 status run:
     gcloud ai custom-jobs list {{ gt }} --filter 'displayName={{ model }}-{{ run }}' --format 'table(state,createTime,startTime,endTime,error.message)'
 
-# A training run's job log (what the container printed)
+# The last 500 lines a training run's job printed
 logs run:
     #!/usr/bin/env bash
     set -euo pipefail
     id="$(gcloud ai custom-jobs list {{ gt }} --filter 'displayName={{ model }}-{{ run }}' --format 'value(name.basename())')"
     [ -n "$id" ] || { echo "no job {{ model }}-{{ run }}" >&2; exit 1; }
     gcloud logging read "resource.type=\"ml_job\" AND resource.labels.job_id=\"$id\" AND NOT textPayload:\"provisioning\"" \
-      --project {{ project }} --order asc --limit 500 --format 'value(textPayload)'
+      --project {{ project }} --order desc --limit 500 --format 'value(textPayload)' | awk '{ l[NR] = $0 } END { for (i = NR; i > 0; i--) print l[i] }'
 
 # Download a training run to runs/<run>/ and show its evaluation verdict
 fetch run:
     mkdir -p runs
-    gcloud storage cp -r {{ bucket }}/training/{{ run }} runs/ --project {{ project }}
+    # gcloud's sliced download of the 438 MB checkpoint fails its hash check on macOS; a single stream does not.
+    CLOUDSDK_STORAGE_SLICED_OBJECT_DOWNLOAD_THRESHOLD=0 gcloud storage cp -r {{ bucket }}/training/{{ run }} runs/ --project {{ project }}
     cat runs/{{ run }}/SOURCE
     grep -E '^\| \*\*Verdict|^\* Flagged' runs/{{ run }}/eval.md || true
     @echo "review runs/{{ run }}/eval.md, then: just publish runs/{{ run }}"
